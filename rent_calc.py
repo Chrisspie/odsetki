@@ -399,3 +399,27 @@ st.download_button(
     file_name=f"odsetki_faktura_{inv.id}.csv",
     mime="text/csv",
 )
+
+# --- Floating note at bottom right ---
+st.markdown(
+    """
+    <style>
+    .coded-by-note {
+        position: fixed;
+        bottom: 10px;
+        right: 20px;
+        background: rgba(255,255,255,0.85);
+        color: #333;
+        padding: 6px 16px;
+        border-radius: 8px;
+        font-size: 0.95em;
+        z-index: 9999;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+        pointer-events: none;
+        user-select: none;
+    }
+    </style>
+    <div class="coded-by-note">Coded by Krzysztof Pietrowicz</div>
+    """,
+    unsafe_allow_html=True
+)
