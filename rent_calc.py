@@ -280,6 +280,21 @@ inv_df = pd.DataFrame([
     for i in st.session_state.invoices
 ])
 
+# --- PODSUMOWANIE ---
+total_interest = inv_df["Odsetki"].sum() if not inv_df.empty else 0.0
+total_due = (inv_df["Kwota"].sum() - inv_df["Wpłaty"].sum()) if not inv_df.empty else 0.0
+
+st.markdown(f"""
+<div style='display:flex;gap:2em;margin-bottom:1em;'>
+  <div style='background:#f8f8e7;padding:1em 2em;border-radius:10px;border:1.5px solid #ffd700;'>
+    <b>💰 Suma odsetek:</b><br><span style='font-size:1.3em;color:#b58900'>{total_interest:,.2f} zł</span>
+  </div>
+  <div style='background:#e7f8e7;padding:1em 2em;border-radius:10px;border:1.5px solid #4caf50;'>
+    <b>🧾 Pozostało do zapłaty:</b><br><span style='font-size:1.3em;color:#388e3c'>{total_due:,.2f} zł</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
 st.subheader("📑 Faktury")
 st.dataframe(inv_df, use_container_width=True)
 
@@ -406,17 +421,20 @@ st.markdown(
     <style>
     .coded-by-note {
         position: fixed;
-        bottom: 10px;
-        right: 20px;
-        background: rgba(255,255,255,0.85);
-        color: #333;
-        padding: 6px 16px;
-        border-radius: 8px;
-        font-size: 0.95em;
-        z-index: 9999;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+        bottom: 18px;
+        right: 28px;
+        background: #fffbe7;
+        color: #222;
+        padding: 8px 20px;
+        border-radius: 10px;
+        font-size: 1.05em;
+        font-weight: bold;
+        z-index: 99999;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.13);
+        border: 2px solid #ffd700;
         pointer-events: none;
         user-select: none;
+        opacity: 0.98;
     }
     </style>
     <div class="coded-by-note">Coded by Krzysztof Pietrowicz</div>
