@@ -14,6 +14,7 @@ Plik CSV do importu faktur (separator średnik):
 from __future__ import annotations
 
 import streamlit as st
+st.set_page_config(layout="wide")
 import pandas as pd
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -416,24 +417,6 @@ st.markdown("""
     <hr style='border: none; border-top: 3px solid #dbe4ee; margin: 2em 0 2em 0;'>
 """, unsafe_allow_html=True)
 
-# --- SZEROKI WRAPPER DLA OBU KOLUMN ---
-st.markdown("""
-<style>
-.faktura-details-wide-box {
-    background: #f3f6fa;
-    border-radius: 16px;
-    border: 2px solid #dbe4ee;
-    padding: 36px 36px 24px 36px;
-    margin-bottom: 2em;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-    max-width: 98vw;
-}
-@media (max-width: 900px) {
-    .faktura-details-wide-box { padding: 10px 2px; }
-}
-</style>
-<div class="faktura-details-wide-box">
-""", unsafe_allow_html=True)
 
 cols = st.columns([1,1], gap="large")
 
