@@ -33,7 +33,7 @@ class Invoice:
     payments: List[Payment] = field(default_factory=list)
 
 # Zweryfikowane stawki (NBP ref + 5,5 p.p.)
-INTEREST_RATES = [
+DEFAULT_INTEREST_RATES = [
     (datetime(2016,1,1),  datetime(2020,3,17), 7.00),
     (datetime(2020,3,18), datetime(2020,4,8),  6.50),
     (datetime(2020,4,9),  datetime(2020,5,28), 6.00),
@@ -54,8 +54,111 @@ INTEREST_RATES = [
     (datetime(2024,6,6),  datetime(2100,1,1), 10.75),
 ]
 
-# --------------------------- Funkcje ---------------------------------------
+if 'interest_rates' not in st.session_state:
+    st.session_state['interest_rates'] = [
+        (d1.strftime('%Y-%m-%d'), d2.strftime('%Y-%m-%d'), rate)
+        for d1, d2, rate in DEFAULT_INTEREST_RATES
+    ]
 
+def parse_date(date_str):
+    return datetime.strptime(date_str, '%Y-%m-%d')
+
+def parse_date_flexible(date_str):
+    date_str = str(date_str).strip()
+    for fmt in ('%Y-%m-%d', '%d.%m.%Y'):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Nieprawidłowy format daty: {date_str}. Dozwolone: YYYY-MM-DD lub DD.MM.YYYY")
+
+with st.expander('⚙️ Stopy procentowe (edytuj)', expanded=False):
+    st.markdown('''Możesz edytować, usuwać lub dodać nowe stopy procentowe.\nZmiany wpływają na wszystkie obliczenia odsetek.''')
+    st.markdown("**Od (YYYY-MM-DD) | Do (YYYY-MM-DD) | %**")
+    rates = st.session_state['interest_rates']
+    remove_idx = None
+    edit_idx = None
+
+    # Edycja istniejących
+    for idx, (start, stop, rate) in enumerate(rates):
+        cols = st.columns([2,2,1,1,1])
+        with cols[0]:
+            new_start = st.text_input("", value=start, key=f"start_{idx}", label_visibility="collapsed")
+        with cols[1]:
+            new_stop = st.text_input("", value=stop, key=f"stop_{idx}", label_visibility="collapsed")
+        with cols[2]:
+            new_rate = st.text_input("", value=str(rate), key=f"rate_{idx}", label_visibility="collapsed")
+        with cols[3]:
+            if st.button("Zapisz", key=f"save_{idx}"):
+                try:
+                    # walidacja daty i stopy
+                    parse_date(new_start)
+                    parse_date(new_stop)
+                    float(new_rate)
+                    rates[idx] = (new_start, new_stop, float(new_rate))
+                    st.success(f"Zmieniono stopę {idx+1}")
+                except Exception as e:
+                    st.error(f"Błąd: {e}")
+        with cols[4]:
+            if st.button("Usuń", key=f"del_{idx}"):
+                remove_idx = idx
+    if remove_idx is not None:
+        rates.pop(remove_idx)
+        st.experimental_rerun()
+
+    st.markdown("---")
+    st.markdown("**Dodaj nową stopę**")
+    with st.form("add_rate"):
+        col1, col2, col3 = st.columns([2,2,1])
+        new_start = col1.text_input("", value="", key="new_start", label_visibility="collapsed")
+        new_stop = col2.text_input("", value="", key="new_stop", label_visibility="collapsed")
+        new_rate = col3.text_input("", value="", key="new_rate", label_visibility="collapsed")
+        submitted = st.form_submit_button("Dodaj")
+        if submitted:
+            try:
+                parse_date(new_start)
+                parse_date(new_stop)
+                rate_val = float(new_rate)
+                rates.append((new_start, new_stop, rate_val))
+                st.success("Dodano nową stopę")
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(f"Błąd: {e}")
+
+# Funkcja do pobierania stawek w formacie do obliczeń
+
+def get_interest_rates():
+    rates = [
+        (parse_date(start), parse_date(stop), float(rate) / 100 if float(rate) > 20 else float(rate))
+        for start, stop, rate in st.session_state['interest_rates']
+    ]
+    validate_interest_rate_ranges(rates)
+    return sorted(rates, key=lambda r: r[0])
+
+# --------------------------- Funkcje ---------------------------------------
+def validate_interest_rate_ranges(rates: list[tuple[datetime, datetime, float]]):
+    """Rzuca ValueError przy:
+    • nachodzących się przedziałach,
+    • lukach > 1 dzień między sąsiednimi przedziałami,
+    • odwróconych datach w pojedynczym przedziale.
+    """
+    rates_sorted = sorted(rates, key=lambda r: r[0])
+    for i, (start, stop, _) in enumerate(rates_sorted):
+        if start > stop:
+            raise ValueError(
+                f"Przedział {i+1}: data 'od' ({start.date()}) jest późniejsza niż 'do' ({stop.date()})")
+
+        if i > 0:
+            prev_start, prev_stop, _ = rates_sorted[i - 1]
+            # nachodzenie się
+            if start <= prev_stop:
+                raise ValueError(
+                    f"Przedziały {i} i {i+1} nachodzą się: {prev_stop.date()} / {start.date()}")
+            # luka
+            if (start - prev_stop).days > 1:
+                raise ValueError(
+                    f"Luka między przedziałami {i} i {i+1}: {prev_stop.date()} → {start.date()}")
+                    
 def detailed_interest_with_payments(
     amount: float,
     due_date: datetime,
@@ -73,22 +176,26 @@ def detailed_interest_with_payments(
 
     rows: list[dict] = []
     principal = amount
-    seg_start = due_date                       # obowiązuje już pierwszy dzień
-    rate_idx = 0                               # wskaźnik na INTEREST_RATES
-
-    for pay in payments_sorted:                # kolejno po wpłatach
-        seg_stop = pay.date                    # wpłata liczona w dniu wpłaty
-
-        # przechodzimy po przedziałach stawek, które nakładają się na (seg_start‑seg_stop)
-        while rate_idx < len(INTEREST_RATES) and INTEREST_RATES[rate_idx][1] < seg_start:
+    seg_start = due_date
+    interest_rates = get_interest_rates()
+    for pay in payments_sorted:
+        seg_end = min(pay.date, stop)
+        if seg_start > seg_end:
+            seg_start = seg_end
+        # 2. rozbijamy segment na okresy stawek procentowych
+        rate_idx = 0
+        while rate_idx < len(interest_rates) and interest_rates[rate_idx][1] < seg_start:
             rate_idx += 1
+        period_from = seg_start
         j = rate_idx
-        while j < len(INTEREST_RATES) and INTEREST_RATES[j][0] <= seg_stop:
-            r_start, r_end, rate = INTEREST_RATES[j]
-            period_from = max(seg_start, r_start)
-            period_to   = min(seg_stop, r_end)
-            if period_from <= period_to and principal > 0:
-                days = (period_to - period_from).days + 1       # obie granice włącznie
+        while j < len(interest_rates):
+            rate_start, rate_end, rate = interest_rates[j]
+            if rate_start > seg_end:
+                break
+            period_from = max(rate_start, seg_start)    
+            period_to = min(rate_end, seg_end)
+            days = (period_to - period_from).days + 1
+            if days > 0:
                 intr = round(principal * rate / 100 * days / 365, 2)
                 rows.append({
                     "Okres od": period_from.date(),
@@ -204,15 +311,22 @@ with col_load:
             for idx, row in df.iterrows():
                 typ = str(row.get("typ", "")).strip().lower()
                 id_fakt = int(row.get("id_faktury", 0))
+
                 if typ == "faktura":
                     termin = str(row.get("termin", "")).strip()
                     amt = float(str(row.get("kwota_faktury", "0")).replace(",", "."))
-                    inv = Invoice(id=id_fakt, due_date=datetime.strptime(termin, "%Y-%m-%d"), amount=amt)
+                    if not termin or termin.lower() == 'nan':
+                        raise ValueError(f"Brak daty w kolumnie 'termin' w wierszu {idx+2} (typ: faktura)")
+                    inv = Invoice(id=id_fakt, due_date=parse_date_flexible(termin), amount=amt)
                     invoices[id_fakt] = inv
+
                 elif typ == "wplata":
-                    data_wpl = str(row.get("data_wplaty", "")).strip()
-                    kwota_wpl = float(str(row.get("kwota_wplaty", "0")).replace(",", "."))
-                    payments.append((id_fakt, Payment(date=datetime.strptime(data_wpl, "%Y-%m-%d"), amount=kwota_wpl)))
+                    data_wpl = str(row.get("termin", "")).strip()
+                    kwota_wpl = float(str(row.get("kwota_faktury", "0")).replace(",", "."))
+                    if not data_wpl or data_wpl.lower() == 'nan':
+                        raise ValueError(f"Brak daty w kolumnie 'termin' w wierszu {idx+2} (typ: wplata)")
+                    payments.append((id_fakt, Payment(date=parse_date_flexible(data_wpl), amount=kwota_wpl)))
+
             # Assign payments to invoices
             for id_fakt, pay in payments:
                 if id_fakt in invoices:
@@ -231,42 +345,6 @@ with col_load:
             st.experimental_rerun()
 
 st.sidebar.markdown("---")
-
-st.sidebar.header("📥 Import faktur z CSV")
-st.sidebar.info("Oczekiwany format: YYYY-MM-DD;kwota\nNp.: 2017-09-10;1041.98")
-uploaded = st.sidebar.file_uploader("Wybierz plik CSV (data;kwota)", type=["csv"])
-if uploaded is not None:
-    try:
-        df_csv = pd.read_csv(uploaded, sep=";", header=None, names=["date","amount"])
-        preview = []
-        added = 0
-        for idx, row in df_csv.iterrows():
-            date_str = str(row["date"]).strip()
-            amt_str = str(row["amount"]).replace(",", ".").strip()
-            try:
-                dt = datetime.strptime(date_str, "%Y-%m-%d")
-                amt = float(amt_str)
-                preview.append({"Data": dt.date(), "Kwota": amt})
-            except Exception:
-                st.warning(f"Nieprawidłowy wiersz (linia {idx+1}): {row.to_list()}")
-        if preview:
-            st.sidebar.write("Podgląd importu:")
-            st.sidebar.dataframe(pd.DataFrame(preview))
-            if st.sidebar.button("Importuj powyższe faktury"):
-                for row in preview:
-                    st.session_state.invoices.append(
-                        Invoice(id=st.session_state.next_id,
-                                due_date=datetime.combine(row["Data"], datetime.min.time()),
-                                amount=row["Kwota"])
-                    )
-                    st.session_state.next_id += 1
-                    added += 1
-                st.sidebar.success(f"Zaimportowano {added} faktur.")
-                st.rerun()
-        else:
-            st.sidebar.warning("Brak poprawnych danych do importu.")
-    except Exception as e:
-        st.sidebar.error(f"Błąd wczytywania CSV: {e}")
 
 # ---------- Lista faktur ---------------------------------------------------
 inv_df = pd.DataFrame([
@@ -331,89 +409,113 @@ with st.sidebar.form(f"edit_inv_{inv.id}"):
         st.success("Faktura usunięta.")
         st.rerun()
 
-# ---------- Płatności ------------------------------------------------------
-st.markdown(f"### 💰 Płatności — faktura **{inv.id}** (termin {inv.due_date.date()})")
+# === Sekcja szczegółów wybranej faktury ===
 
-# Edycja i kasowanie pojedynczych wpłat
-if inv.payments:
-    for idx, p in enumerate(inv.payments):
-        col1, col2, col3 = st.columns([2,2,1])
-        with col1:
-            st.write(p.date.date())
-        with col2:
-            st.write(p.amount)
-        with col3:
-            if st.button("Edytuj", key=f"edit_pay_{inv.id}_{idx}"):
-                st.session_state[f"edit_pay_idx_{inv.id}"] = idx
-            if st.button("Usuń", key=f"del_pay_{inv.id}_{idx}"):
-                inv.payments.pop(idx)
-                st.rerun()
-        # Edycja wpłaty
-        if st.session_state.get(f"edit_pay_idx_{inv.id}") == idx:
-            with st.container():
-                st.markdown("""
-                <div style='background-color: #f3f6fa; border-radius: 8px; padding: 1em; border: 1px solid #dbe4ee; margin-bottom: 1em;'>
-                <b>✏️ Edycja wpłaty</b>
-                """, unsafe_allow_html=True)
-                with st.form(f"form_edit_pay_{inv.id}_{idx}"):
-                    new_p_date = st.date_input("Data wpłaty", value=p.date.date(), key=f"edit_pd_{inv.id}_{idx}")
-                    new_p_amt_str = st.text_input("Kwota wpłaty (zł)", value=str(p.amount).replace(".", ","), key=f"edit_pa_{inv.id}_{idx}")
-                    new_p_amt = None
-                    new_p_amt_error = False
-                    if new_p_amt_str:
-                        try:
-                            new_p_amt = float(new_p_amt_str.replace(",", "."))
-                        except ValueError:
-                            new_p_amt_error = True
-                    if st.form_submit_button("Zapisz zmiany"):
-                        if new_p_amt_error or new_p_amt is None or new_p_amt <= 0:
-                            st.error("Podaj poprawną kwotę (liczba większa od zera, np. 105,44 lub 105.44)")
-                        else:
-                            inv.payments[idx] = Payment(date=datetime.combine(new_p_date, datetime.min.time()), amount=new_p_amt)
+# Separator wizualny (np. cienka linia lub kolorowy pasek)
+st.markdown("""
+    <hr style='border: none; border-top: 3px solid #dbe4ee; margin: 2em 0 2em 0;'>
+""", unsafe_allow_html=True)
+
+# --- SZEROKI WRAPPER DLA OBU KOLUMN ---
+st.markdown("""
+<style>
+.faktura-details-wide-box {
+    background: #f3f6fa;
+    border-radius: 16px;
+    border: 2px solid #dbe4ee;
+    padding: 36px 36px 24px 36px;
+    margin-bottom: 2em;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+    max-width: 98vw;
+}
+@media (max-width: 900px) {
+    .faktura-details-wide-box { padding: 10px 2px; }
+}
+</style>
+<div class="faktura-details-wide-box">
+""", unsafe_allow_html=True)
+
+cols = st.columns([1,1], gap="large")
+
+with cols[0]:
+    st.markdown(f"### 💰 Płatności — faktura **{inv.id}** (termin {inv.due_date.date()})")
+    # Edycja i kasowanie pojedynczych wpłat
+    if inv.payments:
+        for idx, p in enumerate(inv.payments):
+            col1, col2, col3 = st.columns([2,2,1])
+            with col1:
+                st.write(p.date.date())
+            with col2:
+                st.write(p.amount)
+            with col3:
+                if st.button("Edytuj", key=f"edit_pay_{inv.id}_{idx}"):
+                    st.session_state[f"edit_pay_idx_{inv.id}"] = idx
+                if st.button("Usuń", key=f"del_pay_{inv.id}_{idx}"):
+                    inv.payments.pop(idx)
+                    st.rerun()
+            # Edycja wpłaty
+            if st.session_state.get(f"edit_pay_idx_{inv.id}") == idx:
+                with st.container():
+                    st.markdown("""
+                    <div style='background-color: #f3f6fa; border-radius: 8px; padding: 1em; border: 1px solid #dbe4ee; margin-bottom: 1em;'>
+                    <b>✏️ Edycja wpłaty</b>
+                    """, unsafe_allow_html=True)
+                    with st.form(f"form_edit_pay_{inv.id}_{idx}"):
+                        new_p_date = st.date_input("Data wpłaty", value=p.date.date(), key=f"edit_pd_{inv.id}_{idx}")
+                        new_p_amt_str = st.text_input("Kwota wpłaty (zł)", value=str(p.amount).replace(".", ","), key=f"edit_pa_{inv.id}_{idx}")
+                        new_p_amt = None
+                        new_p_amt_error = False
+                        if new_p_amt_str:
+                            try:
+                                new_p_amt = float(new_p_amt_str.replace(",", "."))
+                            except ValueError:
+                                new_p_amt_error = True
+                        if st.form_submit_button("Zapisz zmiany"):
+                            if new_p_amt_error or new_p_amt is None or new_p_amt <= 0:
+                                st.error("Podaj poprawną kwotę (liczba większa od zera, np. 105,44 lub 105.44)")
+                            else:
+                                inv.payments[idx] = Payment(date=datetime.combine(new_p_date, datetime.min.time()), amount=new_p_amt)
+                                st.session_state.pop(f"edit_pay_idx_{inv.id}")
+                                st.rerun()
+                        if st.form_submit_button("Anuluj"):
                             st.session_state.pop(f"edit_pay_idx_{inv.id}")
-                            st.rerun()
-                    if st.form_submit_button("Anuluj"):
-                        st.session_state.pop(f"edit_pay_idx_{inv.id}")
-                st.markdown("</div>", unsafe_allow_html=True)
-else:
-    st.info("Brak wpłat.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.info("Brak wpłat.")
+    with st.form(f"pay_form_{inv.id}"):
+        pay_date = st.date_input("Data wpłaty", value=datetime.today(), key=f"pd_{inv.id}")
+        pay_amt_str = st.text_input("Kwota wpłaty (zł)", value="", key=f"pa_{inv.id}")
+        pay_amt = None
+        pay_amt_error = False
+        if pay_amt_str:
+            try:
+                pay_amt = float(pay_amt_str.replace(",", "."))
+            except ValueError:
+                pay_amt_error = True
+        if st.form_submit_button("Dodaj wpłatę"):
+            if pay_amt_error or pay_amt is None or pay_amt <= 0:
+                st.error("Podaj poprawną kwotę (liczba większa od zera, np. 105,44 lub 105.44)")
+            else:
+                inv.payments.append(Payment(date=datetime.combine(pay_date, datetime.min.time()), amount=pay_amt))
+                st.rerun()
 
-with st.form(f"pay_form_{inv.id}"):
-    pay_date = st.date_input("Data wpłaty", value=datetime.today(), key=f"pd_{inv.id}")
-    pay_amt_str = st.text_input("Kwota wpłaty (zł)", value="", key=f"pa_{inv.id}")
-    pay_amt = None
-    pay_amt_error = False
-    if pay_amt_str:
-        try:
-            pay_amt = float(pay_amt_str.replace(",", "."))
-        except ValueError:
-            pay_amt_error = True
-    if st.form_submit_button("Dodaj wpłatę"):
-        if pay_amt_error or pay_amt is None or pay_amt <= 0:
-            st.error("Podaj poprawną kwotę (liczba większa od zera, np. 105,44 lub 105.44)")
-        else:
-            inv.payments.append(Payment(date=datetime.combine(pay_date, datetime.min.time()), amount=pay_amt))
-            st.rerun()
+with cols[1]:
+    st.markdown("### 🧮 Szczegółowe naliczenie")
+    calc_df = detailed_interest_with_payments(
+        inv.amount,
+        inv.due_date,
+        sorted(inv.payments, key=lambda p: p.date),
+        datetime.today()
+    )
+    st.dataframe(calc_df, use_container_width=True)
+    st.download_button(
+        "⬇️ Pobierz szczegóły (CSV)",
+        data=calc_df.to_csv(index=False, sep=";").encode("utf-8"),
+        file_name=f"odsetki_faktura_{inv.id}.csv",
+        mime="text/csv",
+    )
 
-# ---------- Szczegółowe odsetki -------------------------------------------
-st.markdown("### 🧮 Szczegółowe naliczenie")
-
-calc_df = detailed_interest_with_payments(
-    inv.amount,
-    inv.due_date,
-    sorted(inv.payments, key=lambda p: p.date),
-    datetime.today()
-)
-
-st.dataframe(calc_df, use_container_width=True)
-
-# opcjonalny eksport CSV
-st.download_button(
-    "⬇️ Pobierz szczegóły (CSV)",
-    data=calc_df.to_csv(index=False, sep=";").encode("utf-8"),
-    file_name=f"odsetki_faktura_{inv.id}.csv",
-    mime="text/csv",
-)
+st.markdown("</div>", unsafe_allow_html=True)
 
 # --- Floating note at bottom right ---
 st.markdown(
