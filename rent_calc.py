@@ -40,7 +40,7 @@ DEFAULT_INTEREST_RATES = [
     (datetime(2020,4,9),  datetime(2020,5,28), 6.00),
     (datetime(2020,5,29), datetime(2021,10,6), 5.60),
     (datetime(2021,10,7), datetime(2021,11,3), 6.00),
-    (datetime(2021,11,4), datetime(2021,12,8), 6.75),--tu 8
+    (datetime(2021,11,4), datetime(2021,12,8), 6.75),
     (datetime(2021,12,9), datetime(2022,1,4),  7.25),
     (datetime(2022,1,5),  datetime(2022,2,8),  7.75),
     (datetime(2022,2,9),  datetime(2022,3,8),  8.25),
