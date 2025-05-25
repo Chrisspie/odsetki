@@ -40,19 +40,19 @@ DEFAULT_INTEREST_RATES = [
     (datetime(2020,4,9),  datetime(2020,5,28), 6.00),
     (datetime(2020,5,29), datetime(2021,10,6), 5.60),
     (datetime(2021,10,7), datetime(2021,11,3), 6.00),
-    (datetime(2021,11,4), datetime(2021,12,7), 6.75),
-    (datetime(2021,12,8), datetime(2022,1,4),  7.25),
+    (datetime(2021,11,4), datetime(2021,12,8), 6.75),--tu 8
+    (datetime(2021,12,9), datetime(2022,1,4),  7.25),
     (datetime(2022,1,5),  datetime(2022,2,8),  7.75),
     (datetime(2022,2,9),  datetime(2022,3,8),  8.25),
-    (datetime(2022,3,9),  datetime(2022,4,5),  9.00),
-    (datetime(2022,4,6),  datetime(2022,5,5),  10.00),
+    (datetime(2022,3,9),  datetime(2022,4,6),  9.00),
+    (datetime(2022,4,7),  datetime(2022,5,5),  10.00),
     (datetime(2022,5,6),  datetime(2022,6,8),  10.75),
-    (datetime(2022,6,9),  datetime(2022,7,6),  11.50),
-    (datetime(2022,7,7),  datetime(2022,9,7),  12.00),
+    (datetime(2022,6,9),  datetime(2022,7,7),  11.50),
+    (datetime(2022,7,8),  datetime(2022,9,7),  12.00),
     (datetime(2022,9,8),  datetime(2023,9,6),  12.25),
-    (datetime(2023,9,7),  datetime(2023,10,3), 11.50),
-    (datetime(2023,10,4), datetime(2024,6,5),  11.25),
-    (datetime(2024,6,6),  datetime(2100,1,1), 10.75),
+    (datetime(2023,9,7),  datetime(2023,10,4), 11.50),
+    (datetime(2023,10,5), datetime(2025,5,7),  11.25),
+    (datetime(2025,5,8),  datetime(2025,5,25), 10.75),
 ]
 
 if 'interest_rates' not in st.session_state:
